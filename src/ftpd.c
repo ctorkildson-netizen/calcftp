@@ -237,7 +237,7 @@ static void cmd_stor(const char *arg, bool append)
 		if (time_reached(quiet)) { ok = false; break; }
 		sleep_ms(1);
 	}
-	f_close(&f);
+	if (f_close(&f) != FR_OK) ok = false;		/* (the last of it reaches the card here) */
 	net_conn_close(d);
 	if (ok) { reply("226 Received"); tell(FTPD_RECEIVED, p, done, 0); }
 	else { reply("451 Couldn't write it all (is the card full?)"); tell(FTPD_FAILED, "a file couldn't be written", done, 0); }
