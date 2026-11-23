@@ -294,7 +294,9 @@ int main(void)
 {
 	picocalc_init();
 	printf("\033[2J");
-	bar(ROW_TITLE, "\033[97;44m", " PicoCalc FTP server");
+	char title[48];
+	snprintf(title, sizeof title, " PicoCalc FTP server   0.1 %s", FTP_BUILD);
+	bar(ROW_TITLE, "\033[97;44m", title);
 	const char *note = login();
 
 	char why[96];

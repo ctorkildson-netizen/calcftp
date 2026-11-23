@@ -34,6 +34,13 @@ target_include_directories(ftp PRIVATE src ${TS} ${DRV} ${MODULES}/picocalc-shel
     ${MODULES}/picocalc-extras/screenshot)
 pico_set_program_name(ftp "ftp")
 pico_set_program_version(ftp "0.1")
+# which build this is, on the title bar: the commit and its date
+execute_process(COMMAND git log -1 --format=%h WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
+    OUTPUT_VARIABLE FTP_BUILD OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if (NOT FTP_BUILD)
+    set(FTP_BUILD "unknown")
+endif()
+target_compile_definitions(ftp PRIVATE FTP_BUILD="${FTP_BUILD}")
 pico_enable_stdio_uart(ftp 0)
 pico_enable_stdio_usb(ftp 0)
 target_compile_definitions(ftp PRIVATE CYW43_HOST_NAME="picocalc-ftp")
