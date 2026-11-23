@@ -133,13 +133,25 @@ static void data_close(net_conn *d)
 static const char *const months[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 					"Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
-/* an MLSD/MLST fact line (RFC 3659): type, size, modify; then the name */
+/* a FatFs date that's real (files written while the clock wasn't set have
+   month 0, day 0, which clients like FileZilla treat as a broken entry) */
+static bool dated(const FILINFO *fi)
+{
+	unsigned m = (fi->fdate >> 5) & 15, d = fi->fdate & 31;
+	return m >= 1 && m <= 12 && d >= 1;
+}
+
+/* an MLSD/MLST fact line (RFC 3659): type, size, and modify if the file has
+   a real date; then the name */
 static int facts(char *l, size_t size, const FILINFO *fi, const char *name)
 {
-	return snprintf(l, size, "type=%s;size=%lu;modify=%04u%02u%02u%02u%02u%02u; %s\r\n",
-			(fi->fattrib & AM_DIR) ? "dir" : "file", (unsigned long)fi->fsize,
-			1980 + (fi->fdate >> 9), (fi->fdate >> 5) & 15, fi->fdate & 31,
-			fi->ftime >> 11, (fi->ftime >> 5) & 63, (fi->ftime & 31) * 2, name);
+	char mod[32] = "";
+	if (dated(fi))
+		snprintf(mod, sizeof mod, "modify=%04u%02u%02u%02u%02u%02u;",
+			 1980 + (fi->fdate >> 9), (fi->fdate >> 5) & 15, fi->fdate & 31,
+			 fi->ftime >> 11, (fi->ftime >> 5) & 63, (fi->ftime & 31) * 2);
+	return snprintf(l, size, "type=%s;size=%lu;%s %s\r\n",
+			(fi->fattrib & AM_DIR) ? "dir" : "file", (unsigned long)fi->fsize, mod, name);
 }
 
 enum { LS_LONG, LS_NAMES, LS_FACTS };
@@ -354,6 +366,7 @@ static void command(char *l)
 		resolve(arg, p);
 		if (!strcmp(p, "/") || f_stat(p, &fi) != FR_OK || (fi.fattrib & AM_DIR)) { reply("550 No such file"); return; }
 		if (l[0] == 'S') reply("213 %lu", (unsigned long)fi.fsize);
+		else if (!dated(&fi)) reply("550 It has no date");
 		else reply("213 %04u%02u%02u%02u%02u%02u", 1980 + (fi.fdate >> 9), (fi.fdate >> 5) & 15, fi.fdate & 31,
 			   fi.ftime >> 11, (fi.ftime >> 5) & 63, (fi.ftime & 31) * 2);
 		return;

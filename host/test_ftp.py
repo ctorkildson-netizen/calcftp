@@ -68,6 +68,31 @@ try:
     r = f.sendcmd("MLST /readme.txt")
     check(r.startswith("250-") and "type=file;size=11;" in r and r.rstrip().endswith("250 End"), "MLST")
     check("MLST" in f.sendcmd("FEAT"), "FEAT lists MLST")
+    f.quit()
+finally:
+    srv.kill()
+
+# files written while the clock isn't set: FatFs dates them month 0, day 0
+srv = subprocess.Popen(["./server"], stdout=subprocess.PIPE, text=True, env=dict(os.environ, NO_CLOCK="1"))
+assert srv.stdout.readline().strip() == "listening"
+try:
+    f = ftplib.FTP(); f.connect("127.0.0.1", 2121, timeout=10); f.login("chris", "calc")
+    f.storbinary("STOR /docs/no date.txt", io.BytesIO(b"undated"))
+    ml = dict(f.mlsd("/docs"))
+    e = ml.get("no date.txt", {})
+    check(e.get("size") == "7" and "modify" not in e, "undated file: MLSD leaves out modify (FileZilla drops bad dates)")
+    try: f.sendcmd("MDTM /docs/no date.txt"); check(False, "undated file: MDTM 550")
+    except ftplib.error_perm as x: check(str(x).startswith("550"), "undated file: MDTM 550")
+    lines = []; f.retrlines("LIST /docs", lines.append)
+    check(any("no date.txt" in l and " Jan  1  1980 " in l for l in lines), "undated file: LIST shows 1 Jan 1980")
+    f.delete("/docs/no date.txt")
+    f.quit()
+finally:
+    srv.kill()
+srv = subprocess.Popen(["./server"], stdout=subprocess.PIPE, text=True)
+assert srv.stdout.readline().strip() == "listening"
+try:
+    f = ftplib.FTP(); f.connect("127.0.0.1", 2121, timeout=10); f.login("chris", "calc")
     try: f.sendcmd("SITE CHMOD 777 x"); check(False, "unknown commands: 502")
     except ftplib.error_perm as e: check(str(e).startswith("502"), "unknown commands: 502")
     f.quit()
