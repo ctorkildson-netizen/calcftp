@@ -1,0 +1,7 @@
+build/
+host/server
+host/card.img
+host/*.bin
+host/t.txt
+host/ff/
+net.h
