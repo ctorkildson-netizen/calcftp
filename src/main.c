@@ -99,8 +99,19 @@ static const char *login(void)
 
 /* ------------------------------------------------------------ the screen */
 
-#define LOG_TOP 9
-#define LOG_ROWS 20
+/* rows: the title bar, where to connect, the login, a status pill, then the
+   log (newest at the bottom, scrolling up), and "Esc: quit" */
+#define ROW_TITLE 1
+#define ROW_ADDR 3
+#define ROW_USER 5
+#define ROW_PASS 6
+#define ROW_STATUS 8
+#define LOG_TOP 10
+#define LOG_ROWS 19
+#define ROW_KEYS 31
+
+#define PLAIN "\033[0m"
+#define DIM "\033[90m"
 
 static void at(int row, int col) { printf("\033[%d;%dH", row, col); }
 
@@ -110,59 +121,135 @@ static int width(void)
 	return w > 1 && w <= 80 ? w - 1 : 39;	/* (the last column wraps) */
 }
 
-static void status(const char *s)
+/* a whole-width bar in colour (the escape code), text on it */
+static void bar(int row, const char *colour, const char *text)
 {
-	at(LOG_TOP - 2, 1);
-	printf("\033[K%.*s", width(), s);
+	at(row, 1);
+	printf("%s%-*.*s" PLAIN, colour, width(), width(), text);
 }
 
-/* a line in the log, wrapped to the screen; the log scrolls round */
-static void log_line(const char *s)
+typedef enum { ST_WAIT, ST_CONNECTED, ST_MOVING, ST_ERROR } st_kind;
+
+/* the status: a coloured label, then what's happening */
+static void status(st_kind k, const char *s)
 {
-	static int next;
-	int w = width();
+	static const char *const label[] = { " WAITING ", " CONNECTED ", " BUSY ", " PROBLEM " };
+	static const char *const colour[] = { "\033[30;103m", "\033[30;102m", "\033[30;106m", "\033[97;41m" };
+	at(ROW_STATUS, 1);
+	printf(PLAIN "\033[K%s%s" PLAIN " %.*s", colour[k], label[k], width() - (int)strlen(label[k]) - 1, s);
+}
+
+/* the log: each entry starts with a coloured "> " and a capital, and
+   carries on indented, so entries stand apart when they wrap */
+static char log_text[LOG_ROWS][81];
+static const char *log_colour[LOG_ROWS];
+static int log_n;
+
+static void log_row(const char *colour, const char *lead, const char *text, int n)
+{
+	if (log_n == LOG_ROWS) {		/* scroll up one */
+		memmove(log_text[0], log_text[1], sizeof log_text[0] * (LOG_ROWS - 1));
+		memmove(&log_colour[0], &log_colour[1], sizeof log_colour[0] * (LOG_ROWS - 1));
+		log_n--;
+	}
+	snprintf(log_text[log_n], sizeof log_text[0], "%s%.*s", lead, n, text);
+	log_colour[log_n] = colour;
+	log_n++;
+}
+
+static void log_entry(const char *colour, const char *s)
+{
+	int w = width() - 2;
 	bool first = true;
 	do {
-		at(LOG_TOP + next, 1);
-		printf("\033[K%s%.*s", first ? "" : "  ", first ? w : w - 2, s);
-		size_t took = strlen(s) < (size_t)(first ? w : w - 2) ? strlen(s) : (size_t)(first ? w : w - 2);
-		s += took;
+		int n = (int)strlen(s) < w ? (int)strlen(s) : w;
+		if (n == w) {				/* break at a space if there is one */
+			int k = n;
+			while (k > w / 2 && s[k] != ' ') k--;
+			if (s[k] == ' ') n = k;
+		}
+		log_row(first ? colour : NULL, first ? "> " : "  ", s, n);
+		s += n;
+		while (*s == ' ') s++;
 		first = false;
-		next = (next + 1) % LOG_ROWS;
 	} while (*s);
-	at(LOG_TOP + next, 1);
-	printf("\033[K");			/* a blank line after the newest */
+	for (int r = 0; r < LOG_ROWS; r++) {
+		at(LOG_TOP + r, 1);
+		printf(PLAIN "\033[K");
+		if (r >= log_n) continue;
+		if (log_colour[r]) printf("%s%.2s" PLAIN "%s", log_colour[r], log_text[r], log_text[r] + 2);
+		else printf("%s", log_text[r]);
+	}
 }
+
+#define GREEN "\033[92m"
+#define YELLOW "\033[93m"
+#define RED "\033[91m"
+#define CYAN "\033[96m"
+#define WHITE "\033[97m"
 
 static bool dots(const char *what, void *ctx)
 {
 	(void)ctx;
-	status(what);
+	status(ST_WAIT, what);
 	return true;
+}
+
+static char peer[16];
+
+static void connected(void)
+{
+	char l[48];
+	snprintf(l, sizeof l, "to %s", peer);
+	status(ST_CONNECTED, l);
 }
 
 static void on_event(ftpd_event e, const char *text, uint32_t bytes, uint32_t total, void *ctx)
 {
 	(void)ctx;
-	char l[96];
+	char l[160];
 	static absolute_time_t next;
 	switch (e) {
-	case FTPD_CONNECTED: snprintf(l, sizeof l, "%s connected", text); log_line(l); status("Connected"); break;
-	case FTPD_LOGGED_IN: snprintf(l, sizeof l, "  logged in as %s", text); log_line(l); break;
-	case FTPD_BAD_LOGIN: snprintf(l, sizeof l, "  wrong password for \"%s\"", text); log_line(l); break;
+	case FTPD_CONNECTED:
+		snprintf(peer, sizeof peer, "%s", text);
+		snprintf(l, sizeof l, "Connection from %s", text);
+		log_entry(WHITE, l);
+		connected();
+		break;
+	case FTPD_LOGGED_IN: snprintf(l, sizeof l, "Logged in as %s", text); log_entry(GREEN, l); break;
+	case FTPD_BAD_LOGIN:
+		snprintf(l, sizeof l, "Wrong user name or password (\"%s\")", text);
+		log_entry(RED, l);
+		status(ST_ERROR, "a login was refused");
+		break;
 	case FTPD_SENDING:
 	case FTPD_RECEIVING:
 		if (!time_reached(next)) break;		/* (a few times a second is plenty) */
 		next = make_timeout_time_ms(250);
-		if (total) snprintf(l, sizeof l, "%s %s: %lu of %lu KB", e == FTPD_SENDING ? "Sending" : "Receiving",
+		if (total) snprintf(l, sizeof l, "%s %s: %lu of %lu KB", e == FTPD_SENDING ? "sending" : "receiving",
 				    text, (unsigned long)(bytes / 1024), (unsigned long)(total / 1024));
-		else snprintf(l, sizeof l, "Receiving %s: %lu KB", text, (unsigned long)(bytes / 1024));
-		status(l);
+		else snprintf(l, sizeof l, "receiving %s: %lu KB", text, (unsigned long)(bytes / 1024));
+		status(ST_MOVING, l);
 		break;
-	case FTPD_SENT: snprintf(l, sizeof l, "  sent %s (%lu bytes)", text, (unsigned long)bytes); log_line(l); status("Connected"); break;
-	case FTPD_RECEIVED: snprintf(l, sizeof l, "  received %s (%lu bytes)", text, (unsigned long)bytes); log_line(l); status("Connected"); break;
-	case FTPD_FAILED: snprintf(l, sizeof l, "  %s", text); log_line(l); status("Connected"); break;
-	case FTPD_DISCONNECTED: log_line("  disconnected"); status("Waiting for a connection"); break;
+	case FTPD_SENT:
+		snprintf(l, sizeof l, "Sent %s (%lu bytes)", text, (unsigned long)bytes);
+		log_entry(CYAN, l);
+		connected();
+		break;
+	case FTPD_RECEIVED:
+		snprintf(l, sizeof l, "Received %s (%lu bytes)", text, (unsigned long)bytes);
+		log_entry(CYAN, l);
+		connected();
+		break;
+	case FTPD_FAILED:
+		snprintf(l, sizeof l, "Failed: %s", text);
+		log_entry(RED, l);
+		status(ST_ERROR, text);
+		break;
+	case FTPD_DISCONNECTED:
+		log_entry(YELLOW, "Disconnected");
+		status(ST_WAIT, "for a connection");
+		break;
 	}
 }
 
@@ -176,36 +263,32 @@ static void quit(void)
 int main(void)
 {
 	picocalc_init();
-	printf("\033[2J\033[H\033[1mPicoCalc FTP server\033[0m");
+	printf("\033[2J");
+	bar(ROW_TITLE, "\033[97;44m", " PicoCalc FTP server");
 	const char *note = login();
 
 	char why[96];
-	if (!net_join(dots, NULL, why, sizeof why)) {
-		status(why);
-		at(LOG_TOP, 1);
-		printf("Press a key to go back.");
-		getchar();
-		picocalc_shell_exit();
-		return 0;
-	}
-	if (!ftpd_start(21, user, password, on_event, NULL, why, sizeof why)) {
-		status(why);
-		at(LOG_TOP, 1);
-		printf("Press a key to go back.");
+	bool ok = net_join(dots, NULL, why, sizeof why) &&
+		  ftpd_start(21, user, password, on_event, NULL, why, sizeof why);
+	if (!ok) {
+		status(ST_ERROR, why);
+		at(ROW_KEYS, 1);
+		printf(DIM "Press a key to go back." PLAIN);
 		getchar();
 		quit();
 		return 0;
 	}
-	at(3, 1);
-	printf("Connect to \033[1mftp://%s\033[0m", net_address());
-	at(4, 1);
-	printf("User       %s", user);
-	at(5, 1);
-	printf("Password   %s", password);
-	status("Waiting for a connection");
-	if (note) log_line(note);
-	at(LOG_TOP + LOG_ROWS + 2, 1);
-	printf("Esc: quit");
+	char addr[48];
+	snprintf(addr, sizeof addr, "  ftp://%s", net_address());
+	bar(ROW_ADDR, "\033[1;97;45m", addr);
+	at(ROW_USER, 1);
+	printf(DIM "User     " PLAIN "%s", user);
+	at(ROW_PASS, 1);
+	printf(DIM "Password " PLAIN "%s", password);
+	status(ST_WAIT, "for a connection");
+	if (note) log_entry(YELLOW, note);
+	at(ROW_KEYS, 1);
+	printf(DIM "Esc: quit" PLAIN);
 
 	for (;;) {
 		ftpd_poll();
