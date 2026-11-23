@@ -36,6 +36,6 @@ pico_enable_stdio_uart(ftp 0)
 pico_enable_stdio_usb(ftp 0)
 target_compile_definitions(ftp PRIVATE CYW43_HOST_NAME="picocalc-ftp")
 target_link_libraries(ftp picocalc_net picocalc_fs
-    pico_stdlib pico_rand pico_status_led hardware_gpio hardware_i2c hardware_spi hardware_pio
+    pico_stdlib pico_status_led hardware_gpio hardware_i2c hardware_spi hardware_pio
     hardware_clocks hardware_powman)
 pico_add_extra_outputs(ftp)

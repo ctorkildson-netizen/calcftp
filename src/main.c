@@ -6,9 +6,10 @@
  *     user = picocalc
  *     password = something
  *
- * Without that file, one is made with a random password, shown on the
- * screen. (An old /config_ftp.conf, from the earlier PicoCalc FTP server, is
- * read for its ftp_user and ftp_password if there's no /ftp/ftp.cfg yet.)
+ * Without that file, it's made with the earlier PicoCalc FTP server's login:
+ * the ftp_user and ftp_password in an old /config_ftp.conf if there is one,
+ * or else that server's default, picocalc and picocalc, so FTP clients set
+ * up for it carry on working.
  *
  * The screen shows where to connect and what's happening; Esc quits, leaving
  * the network properly so the next program joins at once.
@@ -17,9 +18,9 @@
 #include <string.h>
 #include <ctype.h>
 #include "pico/stdlib.h"
-#include "pico/rand.h"
 #include "drivers/picocalc.h"
 #include "drivers/keyboard.h"
+#include "drivers/lcd.h"
 #include "ff.h"
 #include "picocalc_shell.h"
 #include "net.h"
@@ -76,13 +77,13 @@ static const char *login(void)
 		return NULL;
 	}
 	const char *note;
+	snprintf(user, sizeof user, "picocalc");		/* the earlier server's default */
+	snprintf(password, sizeof password, "picocalc");
 	if (read_file(OLD_CFG, text, sizeof text) && cfg_value(text, "ftp_user", user, sizeof user)) {
 		cfg_value(text, "ftp_password", password, sizeof password);
-		note = "Login taken from " OLD_CFG "; now in " CFG_PATH;
+		note = "Login from " OLD_CFG " is now in " CFG_PATH;
 	} else {
-		snprintf(user, sizeof user, "picocalc");
-		snprintf(password, sizeof password, "%06lu", (unsigned long)(get_rand_32() % 1000000));
-		note = "Made " CFG_PATH " with a new password: change it there if you like";
+		note = "Made " CFG_PATH ": change the password there if you like";
 	}
 	f_mkdir(CFG_DIR);
 	FIL f;
@@ -103,18 +104,32 @@ static const char *login(void)
 
 static void at(int row, int col) { printf("\033[%d;%dH", row, col); }
 
+static int width(void)
+{
+	int w = lcd_get_columns();
+	return w > 1 && w <= 80 ? w - 1 : 39;	/* (the last column wraps) */
+}
+
 static void status(const char *s)
 {
 	at(LOG_TOP - 2, 1);
-	printf("\033[K%.62s", s);
+	printf("\033[K%.*s", width(), s);
 }
 
+/* a line in the log, wrapped to the screen; the log scrolls round */
 static void log_line(const char *s)
 {
 	static int next;
-	at(LOG_TOP + next, 1);
-	printf("\033[K%.62s", s);
-	next = (next + 1) % LOG_ROWS;
+	int w = width();
+	bool first = true;
+	do {
+		at(LOG_TOP + next, 1);
+		printf("\033[K%s%.*s", first ? "" : "  ", first ? w : w - 2, s);
+		size_t took = strlen(s) < (size_t)(first ? w : w - 2) ? strlen(s) : (size_t)(first ? w : w - 2);
+		s += took;
+		first = false;
+		next = (next + 1) % LOG_ROWS;
+	} while (*s);
 	at(LOG_TOP + next, 1);
 	printf("\033[K");			/* a blank line after the newest */
 }
@@ -182,11 +197,11 @@ int main(void)
 		return 0;
 	}
 	at(3, 1);
-	printf("Connect to  \033[1mftp://%s\033[0m", net_address());
+	printf("Connect to \033[1mftp://%s\033[0m", net_address());
 	at(4, 1);
-	printf("User        %s", user);
+	printf("User       %s", user);
 	at(5, 1);
-	printf("Password    %s", password);
+	printf("Password   %s", password);
 	status("Waiting for a connection");
 	if (note) log_line(note);
 	at(LOG_TOP + LOG_ROWS + 2, 1);
