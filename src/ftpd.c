@@ -205,7 +205,7 @@ static void cmd_retr(const char *arg)
 	f_close(&f);
 	if (ok) ok = net_conn_flush(d, 10000);
 	net_conn_close(d);
-	if (ok) { reply("226 Sent"); tell(FTPD_SENT, base(p), done, total); }
+	if (ok) { reply("226 Sent"); tell(FTPD_SENT, p, done, total); }
 	else { reply("426 The transfer broke off"); tell(FTPD_FAILED, "a transfer broke off", done, total); }
 }
 
@@ -239,7 +239,7 @@ static void cmd_stor(const char *arg, bool append)
 	}
 	f_close(&f);
 	net_conn_close(d);
-	if (ok) { reply("226 Received"); tell(FTPD_RECEIVED, base(p), done, 0); }
+	if (ok) { reply("226 Received"); tell(FTPD_RECEIVED, p, done, 0); }
 	else { reply("451 Couldn't write it all (is the card full?)"); tell(FTPD_FAILED, "a file couldn't be written", done, 0); }
 }
 

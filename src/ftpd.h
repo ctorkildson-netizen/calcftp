@@ -22,8 +22,8 @@ typedef enum {
 	FTPD_BAD_LOGIN,		/* text: the user name tried */
 	FTPD_SENDING,		/* text: the file; bytes: done so far; total: its size */
 	FTPD_RECEIVING,		/* text: the file; bytes: done so far */
-	FTPD_SENT,		/* text: the file; bytes: its size */
-	FTPD_RECEIVED,		/* text: the file; bytes: its size */
+	FTPD_SENT,		/* text: the file's full path; bytes: its size */
+	FTPD_RECEIVED,		/* text: the file's full path; bytes: its size */
 	FTPD_FAILED,		/* text: what went wrong */
 	FTPD_DISCONNECTED,
 } ftpd_event;

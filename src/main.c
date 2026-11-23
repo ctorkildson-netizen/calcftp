@@ -11,8 +11,9 @@
  * or else that server's default, picocalc and picocalc, so FTP clients set
  * up for it carry on working.
  *
- * The screen shows where to connect and what's happening; Esc quits, leaving
- * the network properly so the next program joins at once.
+ * The screen shows where to connect and what's happening; Shift+F5 saves a
+ * screenshot to /screenshots; Esc quits, leaving the network properly so the
+ * next program joins at once.
  */
 #include <stdio.h>
 #include <string.h>
@@ -25,6 +26,7 @@
 #include "picocalc_shell.h"
 #include "net.h"
 #include "ftpd.h"
+#include "lcdshot.h"
 
 #define CFG_DIR "/ftp"
 #define CFG_PATH "/ftp/ftp.cfg"
@@ -288,13 +290,19 @@ int main(void)
 	status(ST_WAIT, "for a connection");
 	if (note) log_entry(YELLOW, note);
 	at(ROW_KEYS, 1);
-	printf(DIM "Esc: quit" PLAIN);
+	printf(DIM "Esc: quit   Shift+F5: screenshot" PLAIN);
 
 	for (;;) {
 		ftpd_poll();
 		if (keyboard_key_available()) {
 			uint8_t k = (uint8_t)keyboard_get_key();
 			if (k == KEY_ESC || k == 0x1b) break;	/* the PicoCalc's Esc (or a Bluetooth keyboard's) */
+			if (k == KEY_F10) {			/* Shift+F5, as the keyboard sends it */
+				char saved[80], l[100];
+				bool ok = lcd_screenshot("ftp", saved, sizeof saved);
+				snprintf(l, sizeof l, ok ? "Screenshot %s" : "Couldn't save a screenshot", saved);
+				log_entry(ok ? WHITE : RED, l);
+			}
 		}
 		sleep_ms(1);
 	}

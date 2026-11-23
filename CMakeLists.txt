@@ -24,12 +24,14 @@ picocalc_net(${MODULES}/picocalc-shell)
 
 add_executable(ftp
     src/main.c src/ftpd.c
+    ${MODULES}/picocalc-extras/screenshot/lcdshot.c
     ${DRV}/picocalc.c ${DRV}/display.c ${DRV}/clib.c ${DRV}/audio.c ${DRV}/onboard_led.c
     ${DRV}/font-5x10.c ${DRV}/font-8x10.c
     ${DRV}/keyboard.c ${DRV}/lcd.c ${DRV}/southbridge.c
 )
 pico_generate_pio_header(ftp ${DRV}/audio.pio)
-target_include_directories(ftp PRIVATE src ${TS} ${DRV} ${MODULES}/picocalc-shell/include)
+target_include_directories(ftp PRIVATE src ${TS} ${DRV} ${MODULES}/picocalc-shell/include
+    ${MODULES}/picocalc-extras/screenshot)
 pico_set_program_name(ftp "ftp")
 pico_set_program_version(ftp "0.1")
 pico_enable_stdio_uart(ftp 0)
