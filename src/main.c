@@ -1,6 +1,7 @@
 /* main.c -- the PicoCalc FTP server: the card, over Wi-Fi, to any FTP client.
  *
- * Wi-Fi comes from /ntp/ntp.cfg (picocalc-extras' net/); the login from
+ * Wi-Fi comes from /ntp/ntp.cfg (picocalc-extras' net/), and the clock is set
+ * from its NTP server on start, so files sent here are dated; the login from
  * /ftp/ftp.cfg:
  *
  *     user = picocalc
@@ -255,6 +256,33 @@ static void on_event(ftpd_event e, const char *text, uint32_t bytes, uint32_t to
 	}
 }
 
+/* the clock from the NTP server, if it answers, so files get real dates;
+   what happened, for the log */
+static const char *set_clock(char *out, size_t n)
+{
+	int64_t ms;
+	char why[96];
+	if (!net_time(&ms, dots, NULL, why, sizeof why)) {
+		snprintf(out, n, "%s: files will have no date", why);
+		return YELLOW;
+	}
+	picocalc_shell_set_time(ms);
+	int64_t utc;
+	int off = 0;
+	picocalc_shell_time(&utc, &off);
+	int64_t s = ms / 1000 + (int64_t)off * 60, days = s / 86400, sod = s % 86400;
+	int64_t z = days + 719468, era = (z >= 0 ? z : z - 146096) / 146097;	/* to a date */
+	unsigned doe = (unsigned)(z - era * 146097);
+	unsigned yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+	int y = (int)(yoe + era * 400);
+	unsigned doy = doe - (365 * yoe + yoe / 4 - yoe / 100), mp = (5 * doy + 2) / 153;
+	unsigned d = doy - (153 * mp + 2) / 5 + 1, m = mp < 10 ? mp + 3 : mp - 9;
+	if (m <= 2) y++;
+	snprintf(out, n, "Clock set: %04d-%02u-%02u %02u:%02u%s", y, m, d,
+		 (unsigned)(sod / 3600), (unsigned)(sod / 60 % 60), off ? "" : " UTC");
+	return GREEN;
+}
+
 static void quit(void)
 {
 	ftpd_stop();
@@ -270,8 +298,11 @@ int main(void)
 	const char *note = login();
 
 	char why[96];
-	bool ok = net_join(dots, NULL, why, sizeof why) &&
-		  ftpd_start(21, user, password, on_event, NULL, why, sizeof why);
+	char clock_note[96];
+	const char *clock_colour = NULL;
+	bool ok = net_join(dots, NULL, why, sizeof why);
+	if (ok) clock_colour = set_clock(clock_note, sizeof clock_note);
+	ok = ok && ftpd_start(21, user, password, on_event, NULL, why, sizeof why);
 	if (!ok) {
 		status(ST_ERROR, why);
 		at(ROW_KEYS, 1);
@@ -288,6 +319,7 @@ int main(void)
 	at(ROW_PASS, 1);
 	printf(DIM "Password " PLAIN "%s", password);
 	status(ST_WAIT, "for a connection");
+	if (clock_colour) log_entry(clock_colour, clock_note);
 	if (note) log_entry(YELLOW, note);
 	at(ROW_KEYS, 1);
 	printf(DIM "Esc: quit   Shift+F5: screenshot" PLAIN);
