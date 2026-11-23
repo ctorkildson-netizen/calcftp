@@ -210,8 +210,8 @@ int main(void)
 	for (;;) {
 		ftpd_poll();
 		if (keyboard_key_available()) {
-			char k = keyboard_get_key();
-			if (k == 0x1b) break;
+			uint8_t k = (uint8_t)keyboard_get_key();
+			if (k == KEY_ESC || k == 0x1b) break;	/* the PicoCalc's Esc (or a Bluetooth keyboard's) */
 		}
 		sleep_ms(1);
 	}
