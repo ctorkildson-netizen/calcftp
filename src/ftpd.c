@@ -133,7 +133,18 @@ static void data_close(net_conn *d)
 static const char *const months[12] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun",
 					"Jul", "Aug", "Sep", "Oct", "Nov", "Dec" };
 
-static void cmd_list(const char *arg, bool names_only)
+/* an MLSD/MLST fact line (RFC 3659): type, size, modify; then the name */
+static int facts(char *l, size_t size, const FILINFO *fi, const char *name)
+{
+	return snprintf(l, size, "type=%s;size=%lu;modify=%04u%02u%02u%02u%02u%02u; %s\r\n",
+			(fi->fattrib & AM_DIR) ? "dir" : "file", (unsigned long)fi->fsize,
+			1980 + (fi->fdate >> 9), (fi->fdate >> 5) & 15, fi->fdate & 31,
+			fi->ftime >> 11, (fi->ftime >> 5) & 63, (fi->ftime & 31) * 2, name);
+}
+
+enum { LS_LONG, LS_NAMES, LS_FACTS };
+
+static void cmd_list(const char *arg, int how)
 {
 	/* "LIST -la" and the like: the options aren't ours to honour */
 	while (arg && *arg == '-') { arg = strchr(arg, ' '); if (arg) while (*arg == ' ') arg++; }
@@ -155,7 +166,8 @@ static void cmd_list(const char *arg, bool names_only)
 		}
 		char l[PATH + 80];
 		int n;
-		if (names_only) n = snprintf(l, sizeof l, "%s\r\n", fi.fname);
+		if (how == LS_NAMES) n = snprintf(l, sizeof l, "%s\r\n", fi.fname);
+		else if (how == LS_FACTS) n = facts(l, sizeof l, &fi, fi.fname);
 		else {
 			unsigned mon = (fi.fdate >> 5) & 15, day = fi.fdate & 31, year = 1980 + (fi.fdate >> 9);
 			n = snprintf(l, sizeof l, "%s 1 picocalc picocalc %10lu %s %2u  %4u %s\r\n",
@@ -293,7 +305,7 @@ static void command(char *l)
 	}
 	if (!strcmp(l, "SYST")) { reply("215 UNIX Type: L8"); return; }
 	if (!strcmp(l, "FEAT")) {
-		static const char f[] = "211-Features:\r\n SIZE\r\n MDTM\r\n UTF8\r\n EPSV\r\n PASV\r\n211 End\r\n";
+		static const char f[] = "211-Features:\r\n SIZE\r\n MDTM\r\n MLST type*;size*;modify*;\r\n UTF8\r\n EPSV\r\n PASV\r\n211 End\r\n";
 		net_conn_write(cli, (const uint8_t *)f, sizeof f - 1);
 		return;
 	}
@@ -315,8 +327,26 @@ static void command(char *l)
 	if (!strcmp(l, "PASV")) { cmd_pasv(false); return; }
 	if (!strcmp(l, "EPSV")) { cmd_pasv(true); return; }
 	if (!strcmp(l, "PORT")) { cmd_port(arg); return; }
-	if (!strcmp(l, "LIST")) { cmd_list(arg, false); return; }
-	if (!strcmp(l, "NLST")) { cmd_list(arg, true); return; }
+	if (!strcmp(l, "LIST")) { cmd_list(arg, LS_LONG); return; }
+	if (!strcmp(l, "NLST")) { cmd_list(arg, LS_NAMES); return; }
+	if (!strcmp(l, "MLSD")) {
+		resolve(arg, p);
+		if (!is_dir(p)) { reply("501 Not a folder"); return; }
+		cmd_list(arg, LS_FACTS);
+		return;
+	}
+	if (!strcmp(l, "MLST")) {
+		resolve(arg, p);
+		if (!strcmp(p, "/")) { memset(&fi, 0, sizeof fi); fi.fattrib = AM_DIR; }
+		else if (f_stat(p, &fi) != FR_OK) { reply("550 No such file or folder"); return; }
+		char f[PATH + 96];
+		facts(f, sizeof f, &fi, p);
+		reply("250-Listing %s", p);
+		net_conn_write(cli, (const uint8_t *)" ", 1);
+		net_conn_write(cli, (const uint8_t *)f, strlen(f));
+		reply("250 End");
+		return;
+	}
 	if (!strcmp(l, "RETR")) { cmd_retr(arg); return; }
 	if (!strcmp(l, "STOR")) { cmd_stor(arg, false); return; }
 	if (!strcmp(l, "APPE")) { cmd_stor(arg, true); return; }

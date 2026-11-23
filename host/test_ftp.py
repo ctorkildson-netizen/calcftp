@@ -62,6 +62,12 @@ try:
     g = socket.create_connection(("127.0.0.1", 2121), timeout=5)
     check(g.recv(100).startswith(b"421"), "a second client is told to come back later"); g.close()
     check(f.sendcmd("FEAT").startswith("211"), "FEAT")
+    ml = dict(f.mlsd("/"))
+    check(ml.get("docs", {}).get("type") == "dir" and ml.get("readme.txt", {}).get("size") == "11"
+          and ml["readme.txt"].get("modify", "").startswith("20"), "MLSD (FileZilla's listing)")
+    r = f.sendcmd("MLST /readme.txt")
+    check(r.startswith("250-") and "type=file;size=11;" in r and r.rstrip().endswith("250 End"), "MLST")
+    check("MLST" in f.sendcmd("FEAT"), "FEAT lists MLST")
     try: f.sendcmd("SITE CHMOD 777 x"); check(False, "unknown commands: 502")
     except ftplib.error_perm as e: check(str(e).startswith("502"), "unknown commands: 502")
     f.quit()
