@@ -235,17 +235,23 @@ static void cmd_stor(const char *arg, bool append)
 	uint32_t done = 0;
 	bool ok = true;
 	absolute_time_t quiet = make_timeout_time_ms(30000);
+	/* Whole buffers to the card: a 4 KB write is eight sectors in one go,
+	   where what arrives in a packet (1460 bytes, say) leaves FatFs part of
+	   a sector to finish each time. */
+	size_t fill = 0;
 	for (;;) {
-		size_t got = net_conn_read(d, buf, sizeof buf);
-		if (got) {
+		size_t got = net_conn_read(d, buf + fill, sizeof buf - fill);
+		bool end = !got && (net_conn_closed_by_host(d) || !net_conn_open(d));
+		fill += got;
+		if (fill == sizeof buf || (end && fill)) {
 			UINT put = 0;
-			if (f_write(&f, buf, (UINT)got, &put) != FR_OK || put != got) { ok = false; break; }
-			done += (uint32_t)got;
+			if (f_write(&f, buf, (UINT)fill, &put) != FR_OK || put != fill) { ok = false; break; }
+			done += (uint32_t)fill;
+			fill = 0;
 			tell(FTPD_RECEIVING, base(p), done, 0);
-			quiet = make_timeout_time_ms(30000);
-			continue;
 		}
-		if (net_conn_closed_by_host(d) || !net_conn_open(d)) break;	/* all of it */
+		if (got) { quiet = make_timeout_time_ms(30000); continue; }
+		if (end) break;					/* all of it */
 		if (time_reached(quiet)) { ok = false; break; }
 		sleep_ms(1);
 	}
